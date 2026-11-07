@@ -1,0 +1,56 @@
+name: Import BI Sys Android source
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/import-bisys-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild and verify source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat import/source.part*.b64 | base64 -d > /tmp/bisys-source-truncated.zip
+          zip -FF /tmp/bisys-source-truncated.zip --out /tmp/bisys-source.zip
+          unzip -t /tmp/bisys-source.zip
+          mkdir -p /tmp/bisys-src
+          unzip -q /tmp/bisys-source.zip -d /tmp/bisys-src
+
+          test "$(find /tmp/bisys-src -type f | wc -l)" -eq 60
+          grep -q "versionCode 7" /tmp/bisys-src/app/build.gradle
+          grep -q "versionName '1.0.6'" /tmp/bisys-src/app/build.gradle
+          grep -q "pl.przemysl.bisys" /tmp/bisys-src/app/build.gradle
+          grep -q "5C:52:0D:B9:5C:84:D2:67:AC:BC:C8:64:DB:BC:9D:A2:82:04:82:32:B2:26:5F:0F:AE:37:B5:36:AC:5E:39:46" /tmp/bisys-src/SIGNATURE-FINGERPRINT.txt
+
+          ! find /tmp/bisys-src -type f \( -name "*.jks" -o -name "*.keystore" -o -name "signing.properties" -o -name "*.apk" -o -name "*.aab" \) | grep -q .
+
+      - name: Import clean source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -mindepth 1 -maxdepth 1             ! -name .git             ! -name .github             ! -name import             -exec rm -rf {} +
+          cp -a /tmp/bisys-src/. .
+          rm -rf import
+          rm -f .github/workflows/import-bisys-source.yml
+
+      - name: Commit imported source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "BI Sys Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Import BI Sys Android 1.0.6 source"
+          git push origin HEAD:main
